@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to your photo library to upload your business logo.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We need access to your camera to take photos for your business logo.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>We'll send notifications when your posts are ready for review or have been posted.</string>
+</dict>
+</plist>
