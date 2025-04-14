@@ -43,12 +43,14 @@ struct MainView: View {
             }
             .navigationDestination(isPresented: $showSettings) {
                 SettingsView(modelContext: modelContext)
+                    .navigationBarBackButtonHidden(true)
             }
             .navigationDestination(isPresented: $showPendingPosts) {
                 PendingPostsView(modelContext: modelContext)
             }
             .navigationDestination(isPresented: $showStatistics) {
                 StatisticsView(modelContext: modelContext)
+                    .navigationBarBackButtonHidden(true)
             }
             .overlay {
                 if viewModel.isLoading {
