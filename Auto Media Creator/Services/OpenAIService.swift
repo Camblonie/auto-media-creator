@@ -1,24 +1,31 @@
 import Foundation
 import UIKit
 
-// Error types for OpenAI service
+// OpenAI Service Error types
 enum OpenAIServiceError: Error {
     case invalidAPIKey
     case networkError(Error)
+    case rateLimitExceeded
+    case decodingError(Error)
+    case unexpectedError(String)
     case invalidResponse
     case invalidImageData
     case invalidURL
     case noContent
-    case rateLimited
     case serverError(Int)
-    case unexpectedError(String)
     
     var description: String {
         switch self {
         case .invalidAPIKey:
-            return "Invalid or missing API key. Please check your settings."
+            return "Invalid OpenAI API key. Please check your settings."
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .rateLimitExceeded:
+            return "OpenAI rate limit exceeded. Please wait a few moments before trying again."
+        case .decodingError(let error):
+            return "Error processing the response: \(error.localizedDescription)"
+        case .unexpectedError(let message):
+            return "Unexpected error: \(message)"
         case .invalidResponse:
             return "Invalid response from server."
         case .invalidImageData:
@@ -27,34 +34,106 @@ enum OpenAIServiceError: Error {
             return "Invalid URL."
         case .noContent:
             return "No content was returned."
-        case .rateLimited:
-            return "Rate limit exceeded. Please try again later."
         case .serverError(let code):
             return "Server error: \(code)"
-        case .unexpectedError(let message):
-            return "Unexpected error: \(message)"
         }
     }
 }
 
-// Main service for OpenAI API interactions
+// OpenAI Service for handling AI-related operations
 class OpenAIService {
+    // MARK: - Properties
     private var apiKey: String = ""
+    
+    // Rate limiting properties
+    private var requestTimestamps: [Date] = []
+    private let maxRequestsPerMinute = 20 // Adjust based on your API tier
+    private let requestWindow: TimeInterval = 60 // 1 minute in seconds
     
     // Base URL for OpenAI API
     private let baseURL = "https://api.openai.com/v1"
     
+    // MARK: - Initialization
     init(apiKey: String = "") {
         self.apiKey = apiKey
     }
     
-    // Set API key
+    // Set the OpenAI API key
     func setAPIKey(_ key: String) {
         self.apiKey = key
+        
+        // Log key status (partial key for security)
+        if !key.isEmpty {
+            let lastFour = key.suffix(4)
+            print("API key set successfully (ending with ....\(lastFour))")
+        } else {
+            print("Warning: Empty API key set")
+        }
+    }
+    
+    // Test API connection with the provided API key
+    func testAPIConnection(apiKey: String, completion: @escaping (Result<Bool, Error>) -> Void) {
+        // Create a simple request to test if the API key is valid
+        let headers = [
+            "Content-Type": "application/json",
+            "Authorization": "Bearer \(apiKey)"
+        ]
+        
+        // Validate API key minimally by checking the models endpoint
+        let url = URL(string: "https://api.openai.com/v1/models")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.allHTTPHeaderFields = headers
+        
+        // Make a simple API call to verify the key
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            // Check for basic errors
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            
+            // Check for HTTP status code
+            if let httpResponse = response as? HTTPURLResponse {
+                if httpResponse.statusCode == 200 {
+                    // API key is valid
+                    completion(.success(true))
+                } else if httpResponse.statusCode == 401 {
+                    // Unauthorized - Invalid API key
+                    completion(.failure(NSError(domain: "com.automediamaker.openai", 
+                                             code: 401, 
+                                             userInfo: [NSLocalizedDescriptionKey: "Invalid API key"])))
+                } else {
+                    // Other HTTP error
+                    completion(.failure(NSError(domain: "com.automediamaker.openai", 
+                                             code: httpResponse.statusCode, 
+                                             userInfo: [NSLocalizedDescriptionKey: "HTTP error \(httpResponse.statusCode)"])))
+                }
+            } else {
+                // Unknown response format
+                completion(.failure(NSError(domain: "com.automediamaker.openai", 
+                                         code: -1, 
+                                         userInfo: [NSLocalizedDescriptionKey: "Invalid response format"])))
+            }
+        }
+        
+        task.resume()
     }
     
     // MARK: - Topic Research
     func researchTopic(topic: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performResearchTopic(topic: topic, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performResearchTopic(topic: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
         // Base prompt for automotive research
         let researchPrompt = """
         Your goal is to identify and compile an automotive repair and maintenance topic that is being covered in the news online. This involves conducting a detailed search for Automotive repair news or new products published yesterday.
@@ -76,6 +155,18 @@ class OpenAIService {
     
     // MARK: - Generate Traditional Post Text
     func generateSocialPost(topic: String, platform: PlatformType, promptGuidance: String, hashtags: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performGenerateSocialPost(topic: topic, platform: platform, promptGuidance: promptGuidance, hashtags: hashtags, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performGenerateSocialPost(topic: String, platform: PlatformType, promptGuidance: String, hashtags: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
         let prompt = """
         Using the research topic provided and following the platform-specific guidelines below, create a social media post for an automotive repair shop.
         
@@ -102,6 +193,18 @@ class OpenAIService {
     
     // MARK: - Generate Image Prompt
     func generateImagePrompt(topic: String, platform: PlatformType, postText: String, graphicGuidance: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performGenerateImagePrompt(topic: topic, platform: platform, postText: postText, graphicGuidance: graphicGuidance, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performGenerateImagePrompt(topic: String, platform: PlatformType, postText: String, graphicGuidance: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
         let prompt = """
         Based on the following social media post for \(platform.rawValue), create a detailed image prompt for DALL-E 3 that will generate a compelling, relevant image for the post.
         
@@ -130,6 +233,18 @@ class OpenAIService {
     
     // MARK: - Generate Meme
     func generateMeme(topic: String, hashtags: String, completion: @escaping (Result<(String, String), OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performGenerateMeme(topic: topic, hashtags: hashtags, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performGenerateMeme(topic: String, hashtags: String, completion: @escaping (Result<(String, String), OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
         let prompt = """
         Create an automotive related meme that an auto repair shop might post to their social media. Make it edgy, funny and relatable. Don't be afraid to lean on current meme culture for inspiration.
         
@@ -180,6 +295,18 @@ class OpenAIService {
     
     // MARK: - Process User Feedback
     func processUserFeedback(originalContent: String, userFeedback: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performProcessUserFeedback(originalContent: originalContent, userFeedback: userFeedback, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performProcessUserFeedback(originalContent: String, userFeedback: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
         let prompt = """
         You are reviewing the following social media post content for an automotive repair shop:
         
@@ -277,13 +404,93 @@ class OpenAIService {
             case 401:
                 completion(.failure(.invalidAPIKey))
             case 429:
-                completion(.failure(.rateLimited))
+                completion(.failure(.rateLimitExceeded))
             default:
                 completion(.failure(.serverError(httpResponse.statusCode)))
             }
         }
         
         task.resume()
+    }
+    
+    // MARK: - Rate Limiting and Retry Helpers
+    
+    // Check if we're within rate limits
+    private func checkRateLimit() -> Bool {
+        // Get the current timestamp
+        let now = Date()
+        
+        // Remove timestamps older than the request window
+        requestTimestamps.removeAll(where: { $0.timeIntervalSinceNow < -requestWindow })
+        
+        // Check if the number of requests within the window exceeds the limit
+        if requestTimestamps.count >= maxRequestsPerMinute {
+            print("⚠️ Rate limit reached: \(requestTimestamps.count) requests in the last \(requestWindow) seconds")
+            return false
+        }
+        
+        // Add the current timestamp to the list
+        requestTimestamps.append(now)
+        print("✓ Rate limit check passed: \(requestTimestamps.count)/\(maxRequestsPerMinute) requests in the last minute")
+        
+        return true
+    }
+    
+    // Reset rate limit counter
+    func resetRateLimits() {
+        requestTimestamps.removeAll()
+        print("Rate limit counters have been reset")
+    }
+    
+    // Get estimated wait time before next request is allowed
+    func getEstimatedWaitTime() -> TimeInterval {
+        guard !requestTimestamps.isEmpty else { return 0 }
+        
+        // Sort timestamps to get the oldest one
+        let sortedTimestamps = requestTimestamps.sorted()
+        
+        // Calculate when the oldest timestamp will expire
+        if requestTimestamps.count >= maxRequestsPerMinute {
+            let oldestTimestamp = sortedTimestamps.first!
+            let expiryTime = oldestTimestamp.addingTimeInterval(requestWindow)
+            let waitTime = expiryTime.timeIntervalSinceNow
+            return max(waitTime, 0)
+        }
+        
+        return 0
+    }
+    
+    // Retry an operation with exponential backoff
+    func retryWithBackoff<T>(
+        maxRetries: Int = 3,
+        operation: @escaping (@escaping (Result<T, OpenAIServiceError>) -> Void) -> Void,
+        completion: @escaping (Result<T, OpenAIServiceError>) -> Void
+    ) {
+        var retries = 0
+        
+        func attempt() {
+            operation { result in
+                switch result {
+                case .success:
+                    completion(result)
+                    
+                case .failure(let error):
+                    if case .rateLimitExceeded = error, retries < maxRetries {
+                        retries += 1
+                        let delay = pow(2.0, Double(retries)) // Exponential backoff: 2, 4, 8, etc. seconds
+                        print("Rate limit hit, retrying in \(delay) seconds (attempt \(retries)/\(maxRetries))")
+                        
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            attempt()
+                        }
+                    } else {
+                        completion(result)
+                    }
+                }
+            }
+        }
+        
+        attempt()
     }
     
     // MARK: - Helper Methods
@@ -318,6 +525,12 @@ class OpenAIService {
             request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         } catch {
             completion(.failure(.unexpectedError("Failed to encode request body: \(error.localizedDescription)")))
+            return
+        }
+        
+        // Check rate limit
+        if !checkRateLimit() {
+            completion(.failure(.rateLimitExceeded))
             return
         }
         
@@ -360,7 +573,7 @@ class OpenAIService {
             case 401:
                 completion(.failure(.invalidAPIKey))
             case 429:
-                completion(.failure(.rateLimited))
+                completion(.failure(.rateLimitExceeded))
             default:
                 completion(.failure(.serverError(httpResponse.statusCode)))
             }

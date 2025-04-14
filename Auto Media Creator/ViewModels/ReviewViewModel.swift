@@ -33,44 +33,41 @@ class ReviewViewModel: ObservableObject {
     private func loadUserSettings() {
         let fetchDescriptor = FetchDescriptor<UserSettings>()
         
-        do {
-            let settings = try modelContext.fetch(fetchDescriptor)
-            if let settings = settings.first, !settings.openAIApiKey.isEmpty {
-                openAIService.setAPIKey(settings.openAIApiKey)
-            }
-        } catch {
-            errorMessage = "Failed to load user settings: \(error.localizedDescription)"
+        // Using try? instead of do-catch since we're handling errors with optional binding
+        if let settings = try? modelContext.fetch(fetchDescriptor).first, 
+           !settings.openAIApiKey.isEmpty {
+            openAIService.setAPIKey(settings.openAIApiKey)
+        } else {
+            errorMessage = "OpenAI API key not found or empty. Please set it in Settings."
             showError = true
         }
     }
     
     func loadPendingPosts() {
-        let pendingStatuses = [
-            ReviewStatus.pendingTextReview.rawValue,
-            ReviewStatus.pendingGraphicReview.rawValue,
-            ReviewStatus.pendingMemeReview.rawValue
-        ]
-        
+        // Using simplest approach possible to fix compiler error
+        // Create predicate for each status individually
         let fetchDescriptor = FetchDescriptor<Post>(
-            predicate: #Predicate {
-                pendingStatuses.contains($0.reviewStatus.rawValue)
-            },
             sortBy: [SortDescriptor(\.creationDate, order: .reverse)]
         )
         
-        do {
-            pendingPosts = try modelContext.fetch(fetchDescriptor)
+        // Using try? to safely fetch and handle errors
+        if let allPosts = try? modelContext.fetch(fetchDescriptor) {
+            // Filter posts in memory instead of with a complex predicate
+            pendingPosts = allPosts.filter { post in
+                post.reviewStatus == .pendingTextReview ||
+                post.reviewStatus == .pendingGraphicReview ||
+                post.reviewStatus == .pendingMemeReview
+            }
+            
             print("Found \(pendingPosts.count) pending posts for review")
             
             // Print details of found posts for debugging
             for (index, post) in pendingPosts.enumerated() {
                 print("Post \(index + 1): Type: \(post.postType.rawValue), Platform: \(post.platformType.rawValue), Status: \(post.reviewStatus.rawValue)")
             }
-            
-        } catch {
-            errorMessage = "Failed to load pending posts: \(error.localizedDescription)"
-            showError = true
-            print("Error loading pending posts: \(error.localizedDescription)")
+        } else {
+            print("Error fetching posts")
+            pendingPosts = []
         }
     }
     
@@ -87,10 +84,12 @@ class ReviewViewModel: ObservableObject {
         post.approveText()
         
         // Generate image prompt based on the approved text
-        // Check if we have OpenAI API key configured
-        let fetchDescriptor = FetchDescriptor<UserSettings>()
-        guard let _ = try? modelContext.fetch(fetchDescriptor).first else {
+        // Only continue if we have OpenAI API key configured
+        guard let settings = try? modelContext.fetch(FetchDescriptor<UserSettings>()).first,
+              !settings.openAIApiKey.isEmpty else {
             isLoading = false
+            errorMessage = "OpenAI API key is not set. Please update your settings."
+            showError = true
             return
         }
         
@@ -229,7 +228,7 @@ class ReviewViewModel: ObservableObject {
                 self.isLoading = false
                 
                 switch result {
-                case .success(let _):
+                case .success(_):
                     // Successfully posted
                     self.loadPendingPosts()
                     
@@ -238,6 +237,45 @@ class ReviewViewModel: ObservableObject {
                     self.showError = true
                 }
             }
+        }
+    }
+    
+    func publishPost(post: Post) {
+        isLoading = true
+        
+        // Publish to social media using correct SocialMediaService method
+        socialMediaService.postContent(post: post) { [weak self] result in
+            guard let self = self else { return }
+            
+            // Update UI on main thread
+            DispatchQueue.main.async {
+                self.isLoading = false
+                
+                switch result {
+                case .success(let postUrl):
+                    // Successfully posted
+                    print("Post successfully published at URL: \(postUrl)")
+                    self.loadPendingPosts()
+                    
+                case .failure(let error):
+                    self.errorMessage = "Failed to post content: \(error.description)"
+                    self.showError = true
+                }
+            }
+        }
+    }
+    
+    // MARK: - Helper Methods for Views
+    
+    // Get platform for UI display
+    func getPlatform(for platformType: PlatformType) -> SocialMediaPlatform? {
+        let platformDescriptor = FetchDescriptor<SocialMediaPlatform>()
+        do {
+            let platforms = try modelContext.fetch(platformDescriptor)
+            return platforms.first { $0.type.rawValue == platformType.rawValue }
+        } catch {
+            print("Error fetching platform: \(error.localizedDescription)")
+            return nil
         }
     }
     

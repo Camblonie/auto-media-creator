@@ -19,39 +19,40 @@ struct StatisticsView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Time frame picker
-                    Picker("Time Frame", selection: $selectedTimeFrame) {
-                        ForEach(TimeFrame.allCases, id: \.self) { timeFrame in
-                            Text(timeFrame.displayName).tag(timeFrame)
-                        }
+        ScrollView {
+            VStack(spacing: 20) {
+                // Time frame picker
+                Picker("Time Frame", selection: $selectedTimeFrame) {
+                    ForEach(TimeFrame.allCases, id: \.self) { timeFrame in
+                        Text(timeFrame.displayName).tag(timeFrame)
                     }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.horizontal)
-                    
-                    // Overview card
-                    overviewCard
-                    
-                    // Platform breakdown chart
-                    platformBreakdownCard
-                    
-                    // Post type statistics
-                    postTypeBreakdownCard
-                    
-                    // Recent activity
-                    recentActivityCard
                 }
-                .padding(.bottom, 30)
+                .pickerStyle(SegmentedPickerStyle())
+                .padding(.horizontal)
+                
+                // Overview card
+                overviewCard
+                
+                // Platform breakdown chart
+                platformBreakdownCard
+                
+                // Post type statistics
+                postTypeBreakdownCard
+                
+                // Recent activity
+                recentActivityCard
             }
-            .navigationTitle("Statistics")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        dismiss()
-                    }) {
+            .padding(.bottom, 30)
+        }
+        .navigationTitle("Statistics")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    dismiss()
+                }) {
+                    HStack {
+                        Image(systemName: "chevron.left")
                         Text("Back")
                     }
                 }

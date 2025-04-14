@@ -128,7 +128,48 @@ struct ReviewPostView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.cardBackgroundColor)
                     .cornerRadius(8)
+                
+                // Add button to show AI prompt
+                DisclosureGroup(
+                    content: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("OpenAI Prompt Template:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            if let platform = viewModel.getPlatform(for: post.platformType) {
+                                ScrollView(.vertical) {
+                                    Text(platform.promptGuidance)
+                                        .font(.system(.caption, design: .monospaced))
+                                        .padding()
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color.gray.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                                .frame(height: 150)
+                            } else {
+                                Text("Platform prompt guidance not available")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    },
+                    label: {
+                        HStack {
+                            Image(systemName: "terminal")
+                            Text("Show OpenAI Prompt")
+                                .font(.caption)
+                            Spacer()
+                        }
+                        .foregroundColor(.blue)
+                    }
+                )
+                .padding(.top, 8)
             }
+            .padding()
+            .background(Color.backgroundColor)
         }
         .padding()
         .background(Color.backgroundColor)
@@ -235,17 +276,61 @@ struct ReviewPostView: View {
                     Text("Image Prompt:")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .padding(.horizontal)
                     
-                    Text(post.imagePrompt)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.cardBackgroundColor)
-                        .cornerRadius(8)
-                        .padding(.horizontal)
+                    // Show the actual prompt used to generate the image
+                    ScrollView {
+                        Text(post.imagePrompt)
+                            .font(.system(.caption, design: .monospaced))
+                            .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(8)
+                    }
+                    .frame(height: 100)
+                    .padding(.horizontal)
+                    
+                    // Add disclosure group to show platform specific image guidance
+                    DisclosureGroup(
+                        content: {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("OpenAI Image Generation Guidance:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                if let platform = viewModel.getPlatform(for: post.platformType) {
+                                    ScrollView(.vertical) {
+                                        Text(platform.graphicGuidance)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .padding()
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .background(Color.gray.opacity(0.1))
+                                            .cornerRadius(8)
+                                    }
+                                    .frame(height: 150)
+                                } else {
+                                    Text("Platform graphic guidance not available")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .italic()
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        },
+                        label: {
+                            HStack {
+                                Image(systemName: "paintbrush")
+                                Text("Show Image Generation Guidelines")
+                                    .font(.caption)
+                                Spacer()
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal)
+                        }
+                    )
+                    .padding(.top, 4)
+                    .padding(.horizontal)
                 }
+                .padding(.vertical, 8)
             }
             
             // Error message if any

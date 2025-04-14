@@ -11,7 +11,7 @@ class MainViewModel: ObservableObject {
     
     // MARK: - Published Properties
     @Published var platforms: [SocialMediaPlatform] = []
-    @Published var userSettings: UserSettings?
+    @Published var settings: UserSettings?
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var showError = false
@@ -23,8 +23,35 @@ class MainViewModel: ObservableObject {
     // MARK: - Initialization
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
-        self.openAIService = OpenAIService()
+        
+        // Check for UserSettings
+        let settingsDescriptor = FetchDescriptor<UserSettings>()
+        if let settings = try? modelContext.fetch(settingsDescriptor).first {
+            self.settings = settings
+            // Initialize OpenAI service with saved API key
+            if !settings.openAIApiKey.isEmpty {
+                self.openAIService = OpenAIService()
+                self.openAIService.setAPIKey(settings.openAIApiKey)
+                print("OpenAI service initialized with stored API key")
+            } else {
+                self.openAIService = OpenAIService()
+                print("No OpenAI API key found in settings")
+            }
+        } else {
+            // Create default settings if none exist
+            let newSettings = UserSettings()
+            modelContext.insert(newSettings)
+            self.settings = newSettings
+            self.openAIService = OpenAIService()
+            print("Created default user settings")
+        }
+        
         self.socialMediaService = SocialMediaService(modelContext: modelContext)
+        
+        // Initialize available platforms
+        for platformType in PlatformType.allCases {
+            platforms.append(SocialMediaPlatform(type: platformType))
+        }
         
         loadData()
     }
@@ -41,7 +68,7 @@ class MainViewModel: ObservableObject {
         do {
             let settings = try modelContext.fetch(fetchDescriptor)
             if let settings = settings.first {
-                userSettings = settings
+                self.settings = settings
                 
                 // Set OpenAI API key if available
                 if !settings.openAIApiKey.isEmpty {
@@ -51,7 +78,7 @@ class MainViewModel: ObservableObject {
                 // Create default settings if none exist
                 let newSettings = UserSettings()
                 modelContext.insert(newSettings)
-                userSettings = newSettings
+                self.settings = newSettings
                 try modelContext.save()
             }
         } catch {
@@ -103,7 +130,7 @@ class MainViewModel: ObservableObject {
     
     // MARK: - Content Generation
     func createTraditionalPost() {
-        guard let settings = userSettings, !settings.openAIApiKey.isEmpty else {
+        guard let settings = self.settings, !settings.openAIApiKey.isEmpty else {
             errorMessage = "OpenAI API key is not set. Please update your settings."
             showError = true
             return
@@ -170,7 +197,7 @@ class MainViewModel: ObservableObject {
     }
     
     private func generatePostContent(post: Post, platform: SocialMediaPlatform, research: String) {
-        guard let settings = userSettings else { return }
+        guard let settings = self.settings else { return }
         
         openAIService.generateSocialPost(
             topic: research,
@@ -203,7 +230,7 @@ class MainViewModel: ObservableObject {
     }
     
     func createMemePost() {
-        guard let settings = userSettings, !settings.openAIApiKey.isEmpty else {
+        guard let settings = self.settings, !settings.openAIApiKey.isEmpty else {
             errorMessage = "OpenAI API key is not set. Please update your settings."
             showError = true
             return

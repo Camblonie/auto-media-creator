@@ -21,6 +21,10 @@ struct SettingsView: View {
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoImage: UIImage?
     
+    // States for API testing
+    @State private var isTestingAPI = false
+    @State private var apiTestResult: APITestResult?
+    
     // State for authentication
     @State private var selectedPlatform: SocialMediaPlatform?
     @State private var showAuthSheet = false
@@ -42,52 +46,91 @@ struct SettingsView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            List {
-                // General settings section
-                Section(header: Text("General Settings")) {
-                    // Business name
-                    TextField("Business Name", text: $businessName)
-                    
-                    // Logo picker
-                    HStack {
-                        Text("Business Logo")
-                        Spacer()
-                        PhotosPicker(selection: $selectedLogo, matching: .images) {
-                            if let logoImage = logoImage {
-                                Image(uiImage: logoImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(width: 44, height: 44)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else {
-                                Image(systemName: "photo.circle")
-                                    .font(.title)
-                                    .foregroundColor(.primaryColor)
-                            }
+        List {
+            // General settings section
+            Section(header: Text("General Settings")) {
+                // Business name
+                TextField("Business Name", text: $businessName)
+                
+                // Logo picker
+                HStack {
+                    Text("Business Logo")
+                    Spacer()
+                    PhotosPicker(selection: $selectedLogo, matching: .images) {
+                        if let logoImage = logoImage {
+                            Image(uiImage: logoImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 44, height: 44)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            Image(systemName: "photo.circle")
+                                .font(.title)
+                                .foregroundColor(.primaryColor)
                         }
-                    }
-                    
-                    // OpenAI API key
-                    VStack(alignment: .leading, spacing: 8) {
-                        SecureField("OpenAI API Key", text: $apiKey)
-                        
-                        Text("Required for content generation")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 
-                // Hashtags section
-                Section(header: Text("Default Hashtags"), footer: Text("These hashtags will be included in all posts")) {
-                    TextEditor(text: $defaultTags)
-                        .frame(minHeight: 100)
+                // OpenAI API key settings section
+                Section(header: Text("API Settings")) {
+                    Text("OpenAI API Key")
+                        .font(.headline)
                     
-                    Button("Reset to Default") {
-                        if userSettings.first != nil {
-                            defaultTags = UserSettings.defaultHashtags
+                    SecureField("Enter your API key", text: $apiKey)
+                        .disableAutocorrection(true)
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(10)
+                        .keyboardType(.default)
+                    
+                    // Test API Connection button
+                    Button(action: {
+                        testAPIConnection()
+                    }) {
+                        HStack {
+                            Image(systemName: "network")
+                            Text("Test API Connection")
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
                     }
+                    .disabled(apiKey.isEmpty || isTestingAPI)
+                    
+                    // Show loading indicator while testing
+                    if isTestingAPI {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle())
+                            Text("Testing connection...")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                    }
+                    
+                    // Show test result if available
+                    if let result = apiTestResult {
+                        HStack {
+                            Image(systemName: result.color == .green ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(result.color)
+                            Text(result.message)
+                                .foregroundColor(result.color)
+                        }
+                        .padding(.vertical, 10)
+                    }
+                    
+                    Text("Default Hashtags")
+                        .font(.headline)
+                        .padding(.top)
+                    
+                    TextField("Enter default hashtags", text: $defaultTags)
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(10)
                 }
                 
                 // Platform connections section
@@ -130,54 +173,57 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        dismiss()
-                    }) {
-                        Text("Cancel")
-                    }
-                }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        saveSettings()
-                        dismiss()
-                    }) {
-                        Text("Save")
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    dismiss()
+                }) {
+                    HStack {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
                     }
                 }
             }
-            .onAppear {
-                loadSettings()
-            }
-            .sheet(isPresented: $showAuthSheet) {
-                if let platform = selectedPlatform {
-                    authenticationSheet(platform: platform)
+            
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    saveSettings()
+                    dismiss()
+                }) {
+                    Text("Save")
                 }
             }
-            .navigationDestination(isPresented: $showPromptConfig) {
-                if let platform = selectedPromptPlatform {
-                    PromptConfigView(platform: platform)
-                }
+        }
+        .onAppear {
+            loadData()
+        }
+        .sheet(isPresented: $showAuthSheet) {
+            if let platform = selectedPlatform {
+                authenticationSheet(platform: platform)
             }
-            .overlay {
-                if isLoading {
-                    LoadingView(message: "Processing...")
-                }
+        }
+        .navigationDestination(isPresented: $showPromptConfig) {
+            if let platform = selectedPromptPlatform {
+                PromptConfigView(platform: platform)
             }
-            .alert(isPresented: $showAlert) {
-                Alert(
-                    title: Text(alertTitle),
-                    message: Text(alertMessage),
-                    dismissButton: .default(Text("OK"))
-                )
+        }
+        .overlay {
+            if isLoading {
+                LoadingView(message: "Processing...")
             }
-            .onChange(of: selectedLogo) { _, newValue in
-                loadImageFromPicker(newValue)
-            }
+        }
+        .alert(isPresented: $showAlert) {
+            Alert(
+                title: Text(alertTitle),
+                message: Text(alertMessage),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+        .onChange(of: selectedLogo) { _, newValue in
+            loadImageFromPicker(newValue)
         }
     }
     
@@ -225,41 +271,39 @@ struct SettingsView: View {
     
     // MARK: - Authentication Sheet
     private func authenticationSheet(platform: SocialMediaPlatform) -> some View {
-        NavigationStack {
-            Form {
-                Section(header: Text("Connect to \(platform.type.rawValue)")) {
-                    TextField("Username or Email", text: $username)
-                        .autocapitalization(.none)
-                        .keyboardType(.emailAddress)
-                    
-                    SecureField("Password", text: $password)
-                    
-                    Button(action: {
-                        connectToPlatform(platform)
-                    }) {
-                        Text("Connect")
-                            .frame(maxWidth: .infinity)
-                            .foregroundColor(.white)
-                            .padding()
-                            .background(Color.blue)
-                            .cornerRadius(10)
-                    }
-                    .disabled(username.isEmpty || password.isEmpty)
-                }
+        Form {
+            Section(header: Text("Connect to \(platform.type.rawValue)")) {
+                TextField("Username or Email", text: $username)
+                    .autocapitalization(.none)
+                    .keyboardType(.emailAddress)
                 
-                Section(footer: Text("For demonstration purposes, authentication will be simulated.")) {
-                    Text("In a production app, this would use OAuth or another secure authentication method provided by the platform.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                SecureField("Password", text: $password)
+                
+                Button(action: {
+                    connectToPlatform(platform)
+                }) {
+                    Text("Connect")
+                        .frame(maxWidth: .infinity)
+                        .foregroundColor(.white)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(10)
                 }
+                .disabled(username.isEmpty || password.isEmpty)
             }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        showAuthSheet = false
-                    }) {
-                        Text("Cancel")
-                    }
+            
+            Section(footer: Text("For demonstration purposes, authentication will be simulated.")) {
+                Text("In a production app, this would use OAuth or another secure authentication method provided by the platform.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button(action: {
+                    showAuthSheet = false
+                }) {
+                    Text("Cancel")
                 }
             }
         }
@@ -267,16 +311,20 @@ struct SettingsView: View {
     
     // MARK: - Helper Methods
     
-    // Load settings
-    private func loadSettings() {
-        guard let settings = userSettings.first else { return }
-        
-        businessName = settings.businessName
-        apiKey = settings.openAIApiKey
-        defaultTags = settings.defaultTags
-        
-        if let logoData = settings.businessLogo {
-            logoImage = UIImage(data: logoData)
+    // Load data
+    private func loadData() {
+        // Load user settings directly with optional binding instead of do-catch
+        if let firstSettings = try? modelContext.fetch(FetchDescriptor<UserSettings>()).first {
+            apiKey = firstSettings.openAIApiKey
+            defaultTags = firstSettings.defaultTags
+            businessName = firstSettings.businessName
+            
+            // Check if we have a logo to display
+            if firstSettings.businessLogo != nil {
+                logoImage = firstSettings.logoImage
+            }
+        } else {
+            print("No settings found or error loading settings")
         }
     }
     
@@ -366,6 +414,55 @@ struct SettingsView: View {
                     showAlert = true
                 }
             }
+        }
+    }
+    
+    // Test API connection
+    private func testAPIConnection() {
+        isTestingAPI = true
+        apiTestResult = nil
+        
+        let openAIService = OpenAIService()
+        openAIService.testAPIConnection(apiKey: apiKey) { result in
+            DispatchQueue.main.async {
+                isTestingAPI = false
+                
+                switch result {
+                case .success:
+                    apiTestResult = .success
+                    // If connection was successful, update the stored key
+                    if let settings = self.userSettings.first {
+                        settings.openAIApiKey = self.apiKey
+                        try? self.modelContext.save()
+                    }
+                case .failure(let error):
+                    apiTestResult = .failure(error.localizedDescription)
+                }
+            }
+        }
+    }
+}
+
+// Enum to represent OpenAI API test results
+enum APITestResult {
+    case success
+    case failure(String)
+    
+    var message: String {
+        switch self {
+        case .success:
+            return "API connection successful! Your key is valid."
+        case .failure(let error):
+            return "API connection failed: \(error)"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .success:
+            return .green
+        case .failure:
+            return .red
         }
     }
 }
