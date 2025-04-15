@@ -129,21 +129,17 @@ class MainViewModel: ObservableObject {
     }
     
     // MARK: - Content Generation
-    func createTraditionalPost() {
-        guard let settings = self.settings, !settings.openAIApiKey.isEmpty else {
-            errorMessage = "OpenAI API key is not set. Please update your settings."
-            showError = true
-            return
-        }
-        
-        let activePlatforms = getActivePlatforms()
-        if activePlatforms.isEmpty {
-            errorMessage = "Please select at least one social media platform."
+    func createTraditionalPost(activePlatforms: [SocialMediaPlatform]) {
+        guard !activePlatforms.isEmpty else {
+            errorMessage = "Please select at least one platform"
             showError = true
             return
         }
         
         isLoading = true
+        
+        // Reset retry counter whenever starting a new request
+        resetRetryCounter()
         
         // Create post group
         let topic = traditionalPostInput.isEmpty ? "general automotive repair and maintenance" : traditionalPostInput
@@ -151,24 +147,31 @@ class MainViewModel: ObservableObject {
         modelContext.insert(postGroup)
         
         // Research the topic
+        performResearchTopic(topic: topic, postGroup: postGroup, activePlatforms: activePlatforms)
+    }
+    
+    private func performResearchTopic(topic: String, postGroup: PostGroup, activePlatforms: [SocialMediaPlatform]) {
         openAIService.researchTopic(topic: topic) { [weak self] result in
             guard let self = self else { return }
             
             switch result {
             case .success(let researchContent):
+                // Reset retry counter on success
+                self.resetRetryCounter()
+                
                 // Create posts for each active platform
                 for platform in activePlatforms {
                     let post = Post(postType: .traditional, 
-                                    userInputPrompt: topic, 
-                                    platformType: platform.type)
+                                   userInputPrompt: topic, 
+                                   platformType: platform.type)
                     
                     self.modelContext.insert(post)
                     postGroup.addPost(post)
                     
                     // Generate platform-specific content
                     self.generatePostContent(post: post, 
-                                            platform: platform, 
-                                            research: researchContent)
+                                           platform: platform, 
+                                           research: researchContent)
                 }
                 
                 DispatchQueue.main.async {
@@ -187,10 +190,19 @@ class MainViewModel: ObservableObject {
                 }
                 
             case .failure(let error):
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.errorMessage = "Failed to research topic: \(error.description)"
-                    self.showError = true
+                // Handle rate limit errors with exponential backoff
+                if case .rateLimitExceeded = error {
+                    self.handleRateLimit {
+                        // Retry the research topic request
+                        self.performResearchTopic(topic: topic, postGroup: postGroup, activePlatforms: activePlatforms)
+                    }
+                } else {
+                    // Handle other errors
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.errorMessage = "Failed to research topic: \(error.description)"
+                        self.showError = true
+                    }
                 }
             }
         }
@@ -229,76 +241,143 @@ class MainViewModel: ObservableObject {
             }
     }
     
-    func createMemePost() {
-        guard let settings = self.settings, !settings.openAIApiKey.isEmpty else {
-            errorMessage = "OpenAI API key is not set. Please update your settings."
-            showError = true
-            return
-        }
-        
-        let activePlatforms = getActivePlatforms()
-        if activePlatforms.isEmpty {
-            errorMessage = "Please select at least one social media platform."
+    func createMemePost(activePlatforms: [SocialMediaPlatform]) {
+        guard !activePlatforms.isEmpty else {
+            errorMessage = "Please select at least one platform"
             showError = true
             return
         }
         
         isLoading = true
         
-        // Create post group
-        let topic = memePostInput.isEmpty ? "automotive humor" : memePostInput
+        // Reset retry counter whenever starting a new request
+        resetRetryCounter()
+        
+        // Create post group for meme
+        let topic = memePostInput.isEmpty ? "automotive meme" : memePostInput
         let postGroup = PostGroup(userInputPrompt: topic, postType: .meme, topic: topic)
         modelContext.insert(postGroup)
         
-        // Generate meme for each active platform
-        for platform in activePlatforms {
-            // Create post object
-            let post = Post(postType: .meme, 
-                           userInputPrompt: topic, 
-                           platformType: platform.type)
+        // Generate meme content
+        performGenerateMeme(topic: topic, postGroup: postGroup, activePlatforms: activePlatforms)
+    }
+    
+    private func performGenerateMeme(topic: String, postGroup: PostGroup, activePlatforms: [SocialMediaPlatform]) {
+        guard let settings = self.settings else { return }
+        
+        openAIService.generateMeme(topic: topic, hashtags: settings.defaultTags) { [weak self] result in
+            guard let self = self else { return }
             
-            self.modelContext.insert(post)
-            postGroup.addPost(post)
-            
-            // Generate meme content
-            openAIService.generateMeme(topic: topic, hashtags: settings.defaultTags) { [weak self] result in
-                guard let self = self else { return }
+            switch result {
+            case .success(let memeContent):
+                // Reset retry counter on success
+                self.resetRetryCounter()
                 
-                switch result {
-                case .success(let (caption, imagePrompt)):
-                    DispatchQueue.main.async {
-                        post.textContent = caption
-                        post.imagePrompt = imagePrompt
-                        // Ensure proper saving with explicit error handling
-                        do {
-                            try self.modelContext.save()
-                            print("Meme content saved for \(platform.type.rawValue)")
-                        } catch {
-                            print("Error saving meme content: \(error.localizedDescription)")
-                        }
-                    }
+                let (memeText, memeImagePrompt) = memeContent
+                
+                // Create a post for each platform
+                for platform in activePlatforms {
+                    let post = Post(postType: .meme,
+                                   userInputPrompt: topic,
+                                   platformType: platform.type)
                     
-                case .failure(let error):
+                    // Set content directly for meme
+                    post.textContent = memeText
+                    post.imagePrompt = memeImagePrompt
+                    post.reviewStatus = .pendingMemeReview
+                    
+                    self.modelContext.insert(post)
+                    postGroup.addPost(post)
+                }
+                
+                DispatchQueue.main.async {
+                    self.isLoading = false
+                    self.memePostInput = ""
+                    
+                    // Save posts
+                    do {
+                        try self.modelContext.save()
+                        print("Created \(postGroup.posts.count) meme posts successfully")
+                    } catch {
+                        self.errorMessage = "Failed to save meme posts: \(error.localizedDescription)"
+                        self.showError = true
+                    }
+                }
+                
+            case .failure(let error):
+                // Handle rate limit errors with exponential backoff
+                if case .rateLimitExceeded = error {
+                    self.handleRateLimit {
+                        // Retry the meme generation
+                        self.performGenerateMeme(topic: topic, postGroup: postGroup, activePlatforms: activePlatforms)
+                    }
+                } else {
+                    // Handle other errors
                     DispatchQueue.main.async {
-                        post.recordError(error.description)
-                        try? self.modelContext.save()
+                        self.isLoading = false
+                        self.errorMessage = "Failed to generate meme: \(error.description)"
+                        self.showError = true
                     }
                 }
             }
         }
+    }
+    
+    // MARK: - OpenAI Rate Limit Handling
+    
+    // Retry parameters
+    private var maxRetryAttempts = 3
+    private var currentRetryAttempt = 0
+    private var retryTimer: Timer?
+    
+    // Handle rate limit with exponential backoff
+    private func handleRateLimit(retryAction: @escaping () -> Void) {
+        // Clear any existing retry timer
+        retryTimer?.invalidate()
         
+        // Check if we've exceeded max retries
+        if currentRetryAttempt >= maxRetryAttempts {
+            DispatchQueue.main.async {
+                self.isLoading = false
+                self.errorMessage = "OpenAI rate limit exceeded. Please try again later."
+                self.showError = true
+                self.currentRetryAttempt = 0
+            }
+            return
+        }
+        
+        // Increment retry attempt
+        currentRetryAttempt += 1
+        
+        // Calculate backoff time (exponential: 2^attempt seconds)
+        let backoffSeconds = pow(2.0, Double(currentRetryAttempt))
+        
+        // Show user-friendly message
         DispatchQueue.main.async {
-            self.isLoading = false
-            self.memePostInput = ""
-            // Ensure proper saving of post group with error handling
-            do {
-                try self.modelContext.save()
-                print("Meme post group created with \(postGroup.posts.count) posts")
-            } catch {
-                self.errorMessage = "Failed to save meme posts: \(error.localizedDescription)"
+            self.errorMessage = "Rate limit exceeded. Retrying in \(Int(backoffSeconds)) seconds... (Attempt \(self.currentRetryAttempt)/\(self.maxRetryAttempts))"
+            self.showError = true
+        }
+        
+        // Schedule retry
+        retryTimer = Timer.scheduledTimer(withTimeInterval: backoffSeconds, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // Update UI to show we're retrying
+            DispatchQueue.main.async {
+                self.errorMessage = "Retrying request..."
                 self.showError = true
             }
+            
+            // Execute the retry action
+            retryAction()
         }
+    }
+    
+    // Reset retry counter
+    private func resetRetryCounter() {
+        currentRetryAttempt = 0
+        retryTimer?.invalidate()
+        retryTimer = nil
     }
     
     // MARK: - Error Handling

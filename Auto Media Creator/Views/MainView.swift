@@ -168,7 +168,7 @@ struct MainView: View {
                 
                 // Create post button
                 Button(action: {
-                    viewModel.createTraditionalPost()
+                    viewModel.createTraditionalPost(activePlatforms: getActivePlatforms())
                 }) {
                     HStack {
                         Image(systemName: "sparkles")
@@ -237,7 +237,7 @@ struct MainView: View {
                 
                 // Create meme button
                 Button(action: {
-                    viewModel.createMemePost()
+                    viewModel.createMemePost(activePlatforms: getActivePlatforms())
                 }) {
                     HStack {
                         Image(systemName: "face.smiling")
@@ -327,6 +327,12 @@ struct MainView: View {
                 .foregroundColor(Color.secondary.opacity(0.2)),
             alignment: .top
         )
+    }
+    
+    // MARK: - Helper function
+    
+    private func getActivePlatforms() -> [SocialMediaPlatform] {
+        viewModel.platforms.filter { $0.isActive }
     }
 }
 
