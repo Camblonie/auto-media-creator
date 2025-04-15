@@ -1,6 +1,17 @@
 import Foundation
 import UIKit
 
+// Helper extensions for logging
+extension String {
+    func truncated(to length: Int, trailing: String = "...") -> String {
+        if self.count > length {
+            return String(self.prefix(length)) + trailing
+        } else {
+            return self
+        }
+    }
+}
+
 // OpenAI Service Error types
 enum OpenAIServiceError: Error {
     case invalidAPIKey
@@ -739,16 +750,5 @@ class OpenAIService {
                 return "\(message["role"] ?? ""): \(message)"
             }
         }.joined(separator: "\n")
-    }
-}
-
-// Helper extensions for logging
-extension String {
-    func truncated(to length: Int, trailing: String = "...") -> String {
-        if self.count > length {
-            return self.prefix(length) + trailing
-        } else {
-            return self
-        }
     }
 }
