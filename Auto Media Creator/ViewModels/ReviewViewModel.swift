@@ -131,14 +131,8 @@ class ReviewViewModel: ObservableObject {
     }
     
     func generateImage(for post: Post) {
-        guard !post.imagePrompt.isEmpty else {
-            isLoading = false
-            errorMessage = "No image prompt available"
-            showError = true
-            return
-        }
+        isLoading = true
         
-        // Generate image from prompt
         openAIService.generateImage(prompt: post.imagePrompt) { [weak self] result in
             guard let self = self else { return }
             
@@ -146,25 +140,26 @@ class ReviewViewModel: ObservableObject {
                 self.isLoading = false
                 
                 switch result {
-                case .success(let image):
-                    if let imageData = image.jpegData(compressionQuality: 0.8) {
-                        post.setImage(imageData)
-                        try? self.modelContext.save()
-                        self.loadPendingPosts()
-                    } else {
-                        post.recordError("Failed to convert image to data")
-                        try? self.modelContext.save()
-                        
-                        self.errorMessage = "Failed to process generated image"
+                case .success(let imageData):
+                    post.setImage(imageData)
+                    post.approve()
+                    
+                    // Save changes
+                    do {
+                        try self.modelContext.save()
+                        print("✅ Image generated and saved successfully")
+                    } catch {
+                        self.errorMessage = "Failed to save image: \(error.localizedDescription)"
                         self.showError = true
                     }
                     
                 case .failure(let error):
-                    post.recordError(error.description)
-                    try? self.modelContext.save()
-                    
                     self.errorMessage = "Failed to generate image: \(error.description)"
                     self.showError = true
+                    
+                    // Record error in the post
+                    post.recordError(error.description)
+                    try? self.modelContext.save()
                 }
             }
         }
