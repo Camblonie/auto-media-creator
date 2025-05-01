@@ -116,54 +116,119 @@ struct PendingPostsView: View {
     
     // List of pending posts
     private var pendingPostsListView: some View {
-        VStack {
+        // Filtering logic must be outside the view builder to avoid SwiftUI generic parameter errors
+        let traditionalPosts = viewModel.pendingPosts.filter { $0.postType == .traditional }
+        let memePosts = viewModel.pendingPosts.filter { $0.postType == .meme }
+        
+        return Group {
             if viewModel.pendingPosts.isEmpty {
                 // Backup empty state in case the list is empty but not caught earlier
                 emptyStateView
             } else {
                 List {
                     // Group posts by type
-                    Section(header: Text("Traditional Posts")) {
-                        let traditionalPosts = viewModel.pendingPosts.filter { $0.postType == .traditional }
-                        if traditionalPosts.isEmpty {
-                            Text("No traditional posts pending review")
-                                .foregroundColor(.secondary)
-                                .italic()
-                                .padding(.vertical, 8)
-                        } else {
-                            ForEach(traditionalPosts, id: \.id) { post in
+                    Section {
+                        ForEach(traditionalPosts) { post in
+                            ZStack {
                                 PendingPostRow(post: post)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         selectedPost = post
                                     }
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    viewModel.deletePost(post)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                        .font(.title3)
+                                }
+                                .tint(.red)
+                            }
                         }
+                    } header: {
+                        Text("Traditional Posts")
                     }
                     
-                    Section(header: Text("Meme Posts")) {
-                        let memePosts = viewModel.pendingPosts.filter { $0.postType == .meme }
-                        if memePosts.isEmpty {
-                            Text("No meme posts pending review")
-                                .foregroundColor(.secondary)
-                                .italic()
-                                .padding(.vertical, 8)
-                        } else {
-                            ForEach(memePosts, id: \.id) { post in
+                    Section {
+                        ForEach(memePosts) { post in
+                            ZStack {
                                 PendingPostRow(post: post)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
                                         selectedPost = post
                                     }
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    viewModel.deletePost(post)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                        .font(.title3)
+                                }
+                                .tint(.red)
+                            }
                         }
+                    } header: {
+                        Text("Meme Posts")
                     }
                 }
                 .listStyle(InsetGroupedListStyle())
+                .background(Color.backgroundColor)
                 .refreshable {
                     // Allow pull-to-refresh to reload posts
                     viewModel.loadPendingPosts()
                 }
+            }
+        }
+    }
+    
+    // Helper view for traditional posts content
+    private struct TraditionalPostsContent: View {
+        let posts: [Post]
+        let onTap: (Post) -> Void
+        let onDelete: (IndexSet) -> Void
+        
+        var body: some View {
+            if posts.isEmpty {
+                Text("No traditional posts pending review")
+                    .foregroundColor(.secondary)
+                    .italic()
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(posts, id: \.id) { post in
+                    PendingPostRow(post: post)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onTap(post)
+                        }
+                }
+                .onDelete(perform: onDelete)
+            }
+        }
+    }
+    
+    // Helper view for meme posts content
+    private struct MemePostsContent: View {
+        let posts: [Post]
+        let onTap: (Post) -> Void
+        let onDelete: (IndexSet) -> Void
+        
+        var body: some View {
+            if posts.isEmpty {
+                Text("No meme posts pending review")
+                    .foregroundColor(.secondary)
+                    .italic()
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(posts, id: \.id) { post in
+                    PendingPostRow(post: post)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onTap(post)
+                        }
+                }
+                .onDelete(perform: onDelete)
             }
         }
     }
@@ -176,32 +241,38 @@ struct PendingPostRow: View {
     let post: Post
     
     var body: some View {
-        HStack {
-            // Platform icon
-            Image(systemName: post.platformType.icon)
-                .foregroundColor(.primaryColor)
-                .font(.title3)
-                .frame(width: 30)
+        HStack(spacing: 12) {
+            // Platform icon with background
+            ZStack {
+                Circle()
+                    .fill(Color.primaryColor.opacity(0.1))
+                    .frame(width: 40, height: 40)
+                
+                Image(systemName: post.platformType.icon)
+                    .foregroundColor(.primaryColor)
+                    .font(.system(size: 18))
+            }
             
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Post type and platform
                 HStack {
                     Text(post.postType.rawValue)
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 2)
-                        .background(post.postType == .traditional ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
+                        .background(post.postType == .traditional ? Color.primaryColor.opacity(0.2) : Color.accentColor.opacity(0.2))
                         .cornerRadius(4)
                     
                     Text(post.platformType.rawValue)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.secondaryColor)
                 }
                 
                 // Post content preview
                 Text(post.textContent.isEmpty ? post.userInputPrompt : post.textContent)
                     .font(.subheadline)
                     .lineLimit(2)
+                    .padding(.vertical, 2)
                 
                 // Status and timestamp
                 HStack {
@@ -219,12 +290,15 @@ struct PendingPostRow: View {
             
             Spacer()
             
-            // Chevron
+            // Chevron with better tap area
             Image(systemName: "chevron.right")
-                .foregroundColor(.gray)
-                .font(.caption)
+                .foregroundColor(.secondaryColor)
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle()) // Make entire row tappable
+        .background(Color.backgroundColor) // Ensure background is tappable
     }
     
     // Helper for status colors

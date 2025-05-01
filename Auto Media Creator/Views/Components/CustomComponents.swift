@@ -306,7 +306,7 @@ struct PlatformCard: View {
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.orange)
+                        .background(Color.accentColor)
                         .foregroundColor(.white)
                         .cornerRadius(8)
                 }

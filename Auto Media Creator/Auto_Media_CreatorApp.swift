@@ -8,51 +8,27 @@
 import SwiftUI
 import SwiftData
 
+// Define a class to hold our shared services
+class AppServices: ObservableObject {
+    let openAIService = OpenAIService()
+}
+
 @main
 struct Auto_Media_CreatorApp: App {
-    // SwiftData model container
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            Item.self,
-            UserSettings.self,
-            SocialMediaPlatform.self,
-            Post.self,
-            PostGroup.self
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
-    
-    // State for app flow
-    @State private var onboardingCompleted = false
+    // Create shared services
+    @StateObject private var appServices = AppServices()
     
     var body: some Scene {
         WindowGroup {
-            ContentView(onboardingCompleted: $onboardingCompleted)
-                .onAppear {
-                    checkOnboardingStatus()
-                }
-        }
-        .modelContainer(sharedModelContainer)
-    }
-    
-    // Check if onboarding has been completed
-    private func checkOnboardingStatus() {
-        let context = sharedModelContainer.mainContext
-        let fetchDescriptor = FetchDescriptor<UserSettings>()
-        
-        do {
-            let settings = try context.fetch(fetchDescriptor)
-            if let settings = settings.first {
-                onboardingCompleted = settings.onboardingCompleted
-            }
-        } catch {
-            print("Failed to fetch user settings: \(error.localizedDescription)")
+            ContentView()
+                .modelContainer(for: [
+                    UserSettings.self,
+                    SocialMediaPlatform.self,
+                    Post.self,
+                    PostGroup.self,
+                    ResearchContent.self
+                ])
+                .environmentObject(appServices)
         }
     }
 }

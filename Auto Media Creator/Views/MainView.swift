@@ -4,6 +4,7 @@ import SwiftData
 struct MainView: View {
     // Environment and data dependencies
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var appServices: AppServices
     @StateObject private var viewModel: MainViewModel
     
     // Navigation states
@@ -21,35 +22,71 @@ struct MainView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 // Header
-                headerView
+                VStack(spacing: 0) {
+                    Text("Auto Media Creator")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundColor(.primaryColor)
+                    
+                    if let headline = viewModel.currentTopic?.headline {
+                        Text(headline)
+                            .font(.subheadline)
+                            .foregroundColor(.secondaryColor)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                }
+                .padding()
+                .background(Color.backgroundColor)
                 
                 // Platform toggle section
                 platformToggleSection
+                    .padding(.vertical, 10)
+                    .background(Color.cardBackgroundColor)
                 
                 // Main content
                 TabView(selection: $selectedTab) {
-                    // Traditional post tab
-                    traditionalPostView
+                    // Topic tab
+                    TopicView(modelContext: modelContext, openAIService: appServices.openAIService)
                         .tag(0)
                     
-                    // Meme post tab
-                    memePostView
+                    // Create Post tab
+                    createPostView
                         .tag(1)
+                    
+                    // Create Meme tab
+                    createMemeView
+                        .tag(2)
+                    
+                    // Pending Posts tab
+                    PendingPostsView(modelContext: modelContext)
+                        .tag(3)
+                    
+                    // Statistics tab
+                    StatisticsView(modelContext: modelContext)
+                        .tag(4)
                 }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .animation(.none, value: selectedTab) // Use the non-deprecated version with a value parameter
+                .gesture(DragGesture()) // Add empty drag gesture to disable swipe
                 
                 // Custom tab bar
                 customTabBar
             }
+            .background(Color.backgroundColor)
+            .overlay(
+                // Add a subtle gradient at the top
+                LinearGradient(
+                    gradient: Gradient(colors: [Color.darkAccentColor.opacity(0.05), Color.clear]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 100)
+                .allowsHitTesting(false),
+                alignment: .top
+            )
             .navigationDestination(isPresented: $showSettings) {
                 SettingsView(modelContext: modelContext)
-                    .navigationBarBackButtonHidden(true)
-            }
-            .navigationDestination(isPresented: $showPendingPosts) {
-                PendingPostsView(modelContext: modelContext)
-            }
-            .navigationDestination(isPresented: $showStatistics) {
-                StatisticsView(modelContext: modelContext)
                     .navigationBarBackButtonHidden(true)
             }
             .overlay {
@@ -66,6 +103,13 @@ struct MainView: View {
                     }
                 )
             })
+            .alert(isPresented: $viewModel.showDraftCreatedAlert) {
+                Alert(
+                    title: Text("Draft Created"),
+                    message: Text("A new post has been generated and can be reviewed in the Pending Posts area."),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
             .onAppear {
                 viewModel.loadData()
             }
@@ -83,24 +127,6 @@ struct MainView: View {
                 .foregroundColor(.primaryColor)
             
             Spacer()
-            
-            // Pending posts button
-            Button(action: {
-                showPendingPosts = true
-            }) {
-                Image(systemName: "list.bullet.clipboard.fill")
-                    .foregroundColor(.primaryColor)
-            }
-            .padding(.horizontal, 8)
-            
-            // Statistics button
-            Button(action: {
-                showStatistics = true
-            }) {
-                Image(systemName: "chart.bar.fill")
-                    .foregroundColor(.primaryColor)
-            }
-            .padding(.horizontal, 8)
             
             // Settings button
             Button(action: {
@@ -123,14 +149,14 @@ struct MainView: View {
                 .padding(.horizontal)
             
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 15) {
+                HStack(spacing: 16) {
                     ForEach(viewModel.platforms, id: \.type) { platform in
                         PlatformToggleButton(
                             platform: platform.type,
                             isActive: platform.isActive,
                             isAuthenticated: platform.isAuthenticated,
                             toggleAction: {
-                                viewModel.updatePlatformStatus(platform: platform, isActive: !platform.isActive)
+                                viewModel.togglePlatform(platform)
                             }
                         )
                     }
@@ -140,199 +166,170 @@ struct MainView: View {
             .padding(.bottom, 8)
         }
         .padding(.top)
+    }
+    
+    // Create Post View
+    private var createPostView: some View {
+        VStack {
+            if let headline = viewModel.currentTopic?.headline,
+               let summary = viewModel.currentTopic?.summary {
+                CreatePostView(
+                    openAIService: appServices.openAIService,
+                    modelContext: modelContext,
+                    topicHeadline: headline,
+                    topicSummary: summary
+                )
+            } else {
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.accentColor)
+                    
+                    Text("No Topic Selected")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    Text("Please generate a topic first in the Topic tab")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                    
+                    Button(action: {
+                        selectedTab = 0
+                    }) {
+                        Text("Go to Topic Tab")
+                            .primaryButtonStyle()
+                    }
+                }
+                .padding()
+            }
+        }
         .background(Color.backgroundColor)
     }
     
-    // Traditional post view
-    private var traditionalPostView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Section header
-            SectionHeader(
-                title: "Create Traditional Post",
-                systemImage: "text.bubble.fill"
-            )
-            
-            VStack(spacing: 16) {
-                Text("Create an engaging social media post based on automotive repair news and trends")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal)
-                
-                // Input field
-                TextInputArea(
-                    title: "Topic (optional)",
-                    placeholder: "Enter a specific topic or leave blank for general automotive news",
-                    text: $viewModel.traditionalPostInput
+    // Create Meme View
+    private var createMemeView: some View {
+        VStack {
+            if let headline = viewModel.currentTopic?.headline,
+               let summary = viewModel.currentTopic?.summary {
+                CreateMemeView(
+                    openAIService: appServices.openAIService,
+                    modelContext: modelContext,
+                    topicHeadline: headline,
+                    topicSummary: summary
                 )
-                .padding(.horizontal)
-                
-                // Create post button
-                Button(action: {
-                    viewModel.createTraditionalPost(activePlatforms: getActivePlatforms())
-                }) {
-                    HStack {
-                        Image(systemName: "sparkles")
-                        Text("Generate Post")
-                        Image(systemName: "sparkles")
+            } else {
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.accentColor)
+                    
+                    Text("No Topic Selected")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    Text("Please generate a topic first in the Topic tab")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                    
+                    Button(action: {
+                        selectedTab = 0
+                    }) {
+                        Text("Go to Topic Tab")
+                            .primaryButtonStyle()
                     }
-                    .primaryButtonStyle()
                 }
-                .padding(.horizontal)
-                .disabled(viewModel.isLoading)
-                
-                // Information
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("What happens next?")
-                        .font(.headline)
-                    
-                    InfoRow(
-                        step: "1",
-                        description: "OpenAI researches current automotive topics"
-                    )
-                    
-                    InfoRow(
-                        step: "2",
-                        description: "Customized posts for each platform are created"
-                    )
-                    
-                    InfoRow(
-                        step: "3",
-                        description: "Review and approve posts before publishing"
-                    )
-                }
-                .padding()
-                .background(Color.cardBackgroundColor)
-                .cornerRadius(10)
                 .padding()
             }
-            
-            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .background(Color.backgroundColor)
-    }
-    
-    // Meme post view
-    private var memePostView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Section header
-            SectionHeader(
-                title: "Create Meme Post",
-                systemImage: "face.smiling.fill"
-            )
-            
-            VStack(spacing: 16) {
-                Text("Create a humorous automotive meme to engage your audience")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal)
-                
-                // Input field
-                TextInputArea(
-                    title: "Meme Topic (optional)",
-                    placeholder: "Enter a specific topic or leave blank for a random automotive meme",
-                    text: $viewModel.memePostInput
-                )
-                .padding(.horizontal)
-                
-                // Create meme button
-                Button(action: {
-                    viewModel.createMemePost(activePlatforms: getActivePlatforms())
-                }) {
-                    HStack {
-                        Image(systemName: "face.smiling")
-                        Text("Generate Meme")
-                        Image(systemName: "face.smiling")
-                    }
-                    .primaryButtonStyle()
-                }
-                .padding(.horizontal)
-                .disabled(viewModel.isLoading)
-                
-                // Information
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Meme Creation Process")
-                        .font(.headline)
-                    
-                    InfoRow(
-                        step: "1",
-                        description: "AI creates a humorous automotive repair meme concept"
-                    )
-                    
-                    InfoRow(
-                        step: "2",
-                        description: "An image with text overlay is generated"
-                    )
-                    
-                    InfoRow(
-                        step: "3",
-                        description: "Review and approve before publishing"
-                    )
-                }
-                .padding()
-                .background(Color.cardBackgroundColor)
-                .cornerRadius(10)
-                .padding()
-            }
-            
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
         .background(Color.backgroundColor)
     }
     
     // Custom tab bar
     private var customTabBar: some View {
         HStack(spacing: 0) {
-            // Traditional posts tab
+            // Topic tab
             Button(action: {
-                withAnimation {
-                    selectedTab = 0
-                }
+                selectedTab = 0
             }) {
                 VStack(spacing: 4) {
-                    Image(systemName: selectedTab == 0 ? "text.bubble.fill" : "text.bubble")
+                    Image(systemName: selectedTab == 0 ? "lightbulb.fill" : "lightbulb")
                         .font(.system(size: 20))
                     
-                    Text("Traditional")
+                    Text("Topic")
                         .font(.caption)
                 }
-                .foregroundColor(selectedTab == 0 ? .primaryColor : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .foregroundColor(selectedTab == 0 ? .accentColor : .secondary)
             }
+            .frame(maxWidth: .infinity)
             
-            // Memes tab
+            // Create Post tab
             Button(action: {
-                withAnimation {
-                    selectedTab = 1
-                }
+                selectedTab = 1
             }) {
                 VStack(spacing: 4) {
-                    Image(systemName: selectedTab == 1 ? "face.smiling.fill" : "face.smiling")
+                    Image(systemName: selectedTab == 1 ? "square.and.pencil.circle.fill" : "square.and.pencil.circle")
                         .font(.system(size: 20))
                     
-                    Text("Memes")
+                    Text("Post")
                         .font(.caption)
                 }
-                .foregroundColor(selectedTab == 1 ? .primaryColor : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+                .foregroundColor(selectedTab == 1 ? .accentColor : .secondary)
             }
+            .frame(maxWidth: .infinity)
+            
+            // Create Meme tab
+            Button(action: {
+                selectedTab = 2
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 2 ? "photo.fill" : "photo")
+                        .font(.system(size: 20))
+                    
+                    Text("Meme")
+                        .font(.caption)
+                }
+                .foregroundColor(selectedTab == 2 ? .accentColor : .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Pending Posts tab
+            Button(action: {
+                selectedTab = 3
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 3 ? "clock.fill" : "clock")
+                        .font(.system(size: 20))
+                    
+                    Text("Pending")
+                        .font(.caption)
+                }
+                .foregroundColor(selectedTab == 3 ? .accentColor : .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            
+            // Statistics tab
+            Button(action: {
+                selectedTab = 4
+            }) {
+                VStack(spacing: 4) {
+                    Image(systemName: selectedTab == 4 ? "chart.bar.fill" : "chart.bar")
+                        .font(.system(size: 20))
+                    
+                    Text("Stats")
+                        .font(.caption)
+                }
+                .foregroundColor(selectedTab == 4 ? .accentColor : .secondary)
+            }
+            .frame(maxWidth: .infinity)
         }
+        .padding(.vertical, 10)
         .background(Color.backgroundColor)
         .overlay(
             Rectangle()
                 .frame(height: 1)
-                .foregroundColor(Color.secondary.opacity(0.2)),
+                .foregroundColor(Color.darkAccentColor.opacity(0.1)),
             alignment: .top
         )
-    }
-    
-    // MARK: - Helper function
-    
-    private func getActivePlatforms() -> [SocialMediaPlatform] {
-        viewModel.platforms.filter { $0.isActive }
     }
 }
 
@@ -351,53 +348,49 @@ struct PlatformToggleButton: View {
                 VStack(spacing: 4) {
                     ZStack {
                         Circle()
-                            .fill(isActive ? Color.primaryColor : Color.gray.opacity(0.3))
+                            .fill(isActive ? Color.primaryColor : Color.darkAccentColor.opacity(0.2))
                             .frame(width: 50, height: 50)
-                        
-                        Image(systemName: platform.icon)
-                            .font(.system(size: 24))
-                            .foregroundColor(.white)
+                        // Use custom LinkedIn image for LinkedIn platform, SF Symbols for others
+                        if platform == .linkedin {
+                            // Prefer the white circle version if available, fallback to the plain version
+                            if let _ = UIImage(named: "linkedin_white_circle") {
+                                Image("linkedin_white_circle")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 32, height: 32)
+                                    .accessibilityLabel("LinkedIn")
+                            } else {
+                                Image("linkedin")
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 32, height: 32)
+                                    .accessibilityLabel("LinkedIn")
+                            }
+                        } else {
+                            Image(systemName: platform.icon)
+                                .font(.system(size: 24))
+                                .foregroundColor(.white)
+                        }
                     }
+                    .shadow(color: isActive ? Color.primaryColor.opacity(0.3) : Color.clear, radius: 4, x: 0, y: 2)
                     
                     Text(platform.rawValue)
                         .font(.caption)
-                        .foregroundColor(isActive ? .primary : .secondary)
+                        .fontWeight(isActive ? .semibold : .regular)
+                        .foregroundColor(isActive ? .primaryColor : .secondary)
                     
                     // Authentication indicator
                     if isAuthenticated {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                            .foregroundColor(.secondaryColor)
                             .font(.system(size: 12))
                     } else {
                         Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.orange)
+                            .foregroundColor(.accentColor)
                             .font(.system(size: 12))
                     }
                 }
             }
-        }
-    }
-}
-
-// Info row for steps
-struct InfoRow: View {
-    let step: String
-    let description: String
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(step)
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(width: 24, height: 24)
-                .background(Color.primaryColor)
-                .cornerRadius(12)
-            
-            Text(description)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            
-            Spacer()
         }
     }
 }

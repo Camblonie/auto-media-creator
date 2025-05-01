@@ -28,7 +28,9 @@ enum PlatformType: String, Codable, CaseIterable {
         switch self {
         case .facebook:
             return """
-            Write a high-engagement Facebook post designed to grab attention and spark conversation. The post should be concise, compelling, and easy to skim. Avoid fluff and get straight to the point. The tone should be confident, conversational, and informative.
+            Write a high-engagement Facebook post with a single topic designed to grab attention and spark conversation. 
+            The post should be concise, compelling, and easy to skim. Avoid fluff and get straight to the point. 
+            The tone should be confident, conversational, and informative.
             Instructions for AI:
             Start with a bold statement, surprising fact, or direct question. No soft intros.
             Provide value immediately. This could be a list, insight, or key takeaway.
@@ -40,16 +42,22 @@ enum PlatformType: String, Codable, CaseIterable {
             Use contractions and avoid overly formal language.
             Keep sentences concise and easy to read.
             If appropriate, use emojis sparingly for emphasis (e.g., 🚀🔥🙌).
+            The post should not be more than one paragraph.
             """
         case .instagram:
             return """
-            You are a skilled Instagram content strategist. Your goal is to write an engaging Instagram caption that grabs attention, feels natural, and encourages likes, shares, and comments. The caption should match Instagram's best-performing styles: short, fun, and direct (for reels/carousels) or story-driven and relatable (for longer captions).
+            You are a skilled Instagram content strategist. Your goal is to write an engaging Instagram caption that grabs attention, feels natural, and encourages likes, shares, and comments. 
+            The caption should match Instagram's best-performing styles: short, fun, and direct (for reels/carousels) or story-driven and relatable (for longer captions).
             Key Elements for Success:
-            ✅ A strong hook (first line must grab attention!) ✅ Conversational, like texting a friend—no robotic/formal writing. ✅ Brevity—keep it short, snappy, and engaging. ✅ If longer, structure it as a micro-story with a punchline. ✅ Clear CTA—comments, DMs, tags, or actions.
+            A strong hook (first line must grab attention!)
+            Conversational, like texting a friend—no robotic/formal writing. 
+            Brevity—keep it short, snappy, and engaging. 
+            If longer, structure it as a micro-story with a punchline. 
+            Clear CTA—comments, DMs, tags, or actions.
             Best-Performing Instagram Caption Styles & Examples
-            1️⃣ Punchy & Fun (For Reels & Carousels)
+            Punchy & Fun (For Reels & Carousels)
             These captions are quick, witty, and spark engagement.
-            2️⃣ Relatable & Conversational (For Personal Branding)
+            Relatable & Conversational (For Personal Branding)
             More storytelling, personal insights, and engagement-driven.
             """
         case .tiktok:

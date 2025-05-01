@@ -131,8 +131,14 @@ class ReviewViewModel: ObservableObject {
     }
     
     func generateImage(for post: Post) {
-        isLoading = true
+        guard !post.imagePrompt.isEmpty else {
+            isLoading = false
+            errorMessage = "No image prompt available"
+            showError = true
+            return
+        }
         
+        // Generate image from prompt
         openAIService.generateImage(prompt: post.imagePrompt) { [weak self] result in
             guard let self = self else { return }
             
@@ -140,26 +146,25 @@ class ReviewViewModel: ObservableObject {
                 self.isLoading = false
                 
                 switch result {
-                case .success(let imageData):
-                    post.setImage(imageData)
-                    post.approve()
-                    
-                    // Save changes
-                    do {
-                        try self.modelContext.save()
-                        print("✅ Image generated and saved successfully")
-                    } catch {
-                        self.errorMessage = "Failed to save image: \(error.localizedDescription)"
+                case .success(let image):
+                    if let imageData = image.jpegData(compressionQuality: 0.8) {
+                        post.setImage(imageData)
+                        try? self.modelContext.save()
+                        self.loadPendingPosts()
+                    } else {
+                        post.recordError("Failed to convert image to data")
+                        try? self.modelContext.save()
+                        
+                        self.errorMessage = "Failed to process generated image"
                         self.showError = true
                     }
                     
                 case .failure(let error):
-                    self.errorMessage = "Failed to generate image: \(error.description)"
-                    self.showError = true
-                    
-                    // Record error in the post
                     post.recordError(error.description)
                     try? self.modelContext.save()
+                    
+                    self.errorMessage = "Failed to generate image: \(error.description)"
+                    self.showError = true
                 }
             }
         }
@@ -256,6 +261,59 @@ class ReviewViewModel: ObservableObject {
                     self.errorMessage = "Failed to post content: \(error.description)"
                     self.showError = true
                 }
+            }
+        }
+    }
+    
+    // Delete multiple posts from the model context
+    func deletePosts(_ posts: [Post]) {
+        // Ensure all modelContext operations are performed on the main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            // Delete each post from the model context
+            for post in posts {
+                self.modelContext.delete(post)
+            }
+            
+            // Save changes to the data store
+            do {
+                try self.modelContext.save()
+                // Reload posts list to update UI
+                self.loadPendingPosts()
+            } catch {
+                // Handle any errors that occur during deletion
+                self.errorMessage = "Failed to delete posts: \(error.localizedDescription)"
+                self.showError = true
+            }
+        }
+    }
+    
+    // MARK: - Delete Posts
+    
+    /// Delete a single post
+    func deletePost(_ post: Post) {
+        // Ensure all modelContext operations are performed on the main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            // Delete the post from the model context
+            self.modelContext.delete(post)
+            
+            // Save changes to the data store
+            do {
+                try self.modelContext.save()
+                
+                // Update the UI by removing the post from the pendingPosts array
+                if let index = self.pendingPosts.firstIndex(where: { $0.id == post.id }) {
+                    self.pendingPosts.remove(at: index)
+                }
+                
+                print("Successfully deleted post: \(post.id)")
+            } catch {
+                // Handle any errors that occur during saving
+                self.errorMessage = "Failed to delete post: \(error.localizedDescription)"
+                self.showError = true
+                print("Error deleting post: \(error.localizedDescription)")
             }
         }
     }
@@ -366,6 +424,45 @@ class ReviewViewModel: ObservableObject {
                     self.showError = true
                 }
             }
+        }
+    }
+    
+    // MARK: - Continue to Create Image
+    /// Called when the user taps "Continue to Create Image". Generates an image prompt if needed, then generates the image.
+    func continueToCreateImage(for post: Post) {
+        isLoading = true
+        // If there's no image prompt, generate it first (for traditional posts)
+        if post.imagePrompt.isEmpty {
+            // Get platform for guidance
+            guard let platform = getPlatform(for: post.platformType) else {
+                isLoading = false
+                errorMessage = "Platform guidance not found."
+                showError = true
+                return
+            }
+            openAIService.generateImagePrompt(
+                topic: post.userInputPrompt,
+                platform: post.platformType,
+                postText: post.textContent,
+                graphicGuidance: platform.graphicGuidance
+            ) { [weak self] result in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let imagePrompt):
+                        post.imagePrompt = imagePrompt
+                        try? self.modelContext.save()
+                        self.generateImage(for: post)
+                    case .failure(let error):
+                        self.isLoading = false
+                        self.errorMessage = "Failed to generate image prompt: \(error.description)"
+                        self.showError = true
+                    }
+                }
+            }
+        } else {
+            // If prompt already exists, just generate the image
+            generateImage(for: post)
         }
     }
     

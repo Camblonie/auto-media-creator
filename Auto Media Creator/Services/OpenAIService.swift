@@ -1,17 +1,6 @@
 import Foundation
 import UIKit
 
-// Helper extensions for logging
-extension String {
-    func truncated(to length: Int, trailing: String = "...") -> String {
-        if self.count > length {
-            return String(self.prefix(length)) + trailing
-        } else {
-            return self
-        }
-    }
-}
-
 // OpenAI Service Error types
 enum OpenAIServiceError: Error {
     case invalidAPIKey
@@ -61,23 +50,17 @@ class OpenAIService {
     private let maxRequestsPerMinute = 20 // Adjust based on your API tier
     private let requestWindow: TimeInterval = 60 // 1 minute in seconds
     
-    // Logging configuration
-    private let enableDetailedLogging = true // Set to false to disable detailed logs
-    private let logResponses = true // Log response bodies
-    
     // Base URL for OpenAI API
     private let baseURL = "https://api.openai.com/v1"
     
     // MARK: - Initialization
     init(apiKey: String = "") {
         self.apiKey = apiKey
-        print("📱 OpenAIService initialized")
     }
     
     // Set the OpenAI API key
     func setAPIKey(_ key: String) {
         self.apiKey = key
-        print("📱 API key updated")
         
         // Log key status (partial key for security)
         if !key.isEmpty {
@@ -153,8 +136,11 @@ class OpenAIService {
         
         // Base prompt for automotive research
         let researchPrompt = """
-        Your goal is to identify and compile an automotive repair and maintenance topic that is being covered in the news online. This involves conducting a detailed search for Automotive repair news or new products published yesterday.
-        Focus on automotive repair and maintenance from reputable sources. Look for exciting trending news or new products that's just launched specifically about automotive products or brands. Look for articles reminding people to have maintenance performed on their vehicles.
+        Your goal is to identify and compile a single automotive repair and maintenance topic that is being covered in the news online. 
+        This involves conducting a detailed search for Automotive repair news or new products published yesterday.
+        Focus on automotive repair and maintenance from reputable sources. 
+        Look for exciting trending news or new products that's just launched specifically about automotive products or brands. 
+        Give priority to articles reminding people to have maintenance performed on their vehicles.
         
         Topic to research: \(topic)
         
@@ -163,7 +149,7 @@ class OpenAIService {
         
         sendChatRequest(
             messages: [
-                ["role": "system", "content": "You are a research assistant for an automotive repair shop."],
+                ["role": "system", "content": "You are a social media expert for an automotive repair shop."],
                 ["role": "user", "content": researchPrompt]
             ],
             completion: completion
@@ -263,7 +249,7 @@ class OpenAIService {
         }
         
         let prompt = """
-        Create an automotive related meme that an auto repair shop might post to their social media. Make it edgy, funny and relatable. Don't be afraid to lean on current meme culture for inspiration.
+        Create an automotive related meme that an auto repair shop might post to their social media. Make it edgy, funny and relatable to american customers who are unfamiliar with mechanical parts. Don't be afraid to lean on current meme culture for inspiration. Do not incorporate text in the image.
         
         TOPIC (if specified):
         \(topic)
@@ -310,6 +296,154 @@ class OpenAIService {
         }
     }
     
+    // MARK: - Generate Meme Text
+    func generateMemeText(prompt: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
+            self?.performGenerateMemeText(prompt: prompt, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performGenerateMemeText(prompt: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
+        // Send chat request
+        sendChatRequest(
+            messages: [
+                ["role": "system", "content": "You are a creative and humorous social media expert for an automotive repair shop."],
+                ["role": "user", "content": prompt]
+            ],
+            completion: completion
+        )
+    }
+    
+    // MARK: - Generate Image
+    func generateImage(prompt: String, completion: @escaping (Result<UIImage, OpenAIServiceError>) -> Void) {
+        retryWithBackoff(maxRetries: 2, operation: { [weak self] innerCompletion in
+            self?.performGenerateImage(prompt: prompt, completion: innerCompletion)
+        }, completion: completion)
+    }
+    
+    private func performGenerateImage(prompt: String, completion: @escaping (Result<UIImage, OpenAIServiceError>) -> Void) {
+        // Check rate limiting first
+        guard checkRateLimit() else {
+            completion(.failure(.rateLimitExceeded))
+            return
+        }
+        
+        // Ensure the API key is set
+        guard !apiKey.isEmpty else {
+            completion(.failure(.invalidAPIKey))
+            return
+        }
+        
+        // Ensure the URL is valid
+        guard let url = URL(string: "\(baseURL)/images/generations") else {
+            completion(.failure(.invalidURL))
+            return
+        }
+        
+        // Create the request
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        // Create the request body
+        let requestBody: [String: Any] = [
+            "model": "dall-e-3",
+            "prompt": prompt,
+            "n": 1,
+            "size": "1024x1024"
+        ]
+        
+        do {
+            // Convert the request body to JSON data
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        } catch {
+            completion(.failure(.unexpectedError("Failed to encode request body: \(error.localizedDescription)")))
+            return
+        }
+        
+        // Send the request
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            // Check for errors
+            if let error = error {
+                completion(.failure(.networkError(error)))
+                return
+            }
+            
+            // Check for valid response and data
+            guard let httpResponse = response as? HTTPURLResponse else {
+                completion(.failure(.invalidResponse))
+                return
+            }
+            
+            guard let data = data else {
+                completion(.failure(.noContent))
+                return
+            }
+            
+            // Handle different HTTP status codes
+            switch httpResponse.statusCode {
+            case 200:
+                // Try to parse the response
+                do {
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let dataArray = json["data"] as? [[String: Any]],
+                       let firstData = dataArray.first,
+                       let imageUrl = firstData["url"] as? String,
+                       let url = URL(string: imageUrl) {
+                        
+                        // Download the image
+                        self?.downloadImage(from: url, completion: completion)
+                    } else {
+                        completion(.failure(.invalidResponse))
+                    }
+                } catch {
+                    completion(.failure(.decodingError(error)))
+                }
+            case 401:
+                completion(.failure(.invalidAPIKey))
+            case 429:
+                completion(.failure(.rateLimitExceeded))
+            default:
+                completion(.failure(.serverError(httpResponse.statusCode)))
+            }
+        }
+        
+        task.resume()
+    }
+    
+    // Helper method to download an image from a URL
+    private func downloadImage(from url: URL, completion: @escaping (Result<UIImage, OpenAIServiceError>) -> Void) {
+        let task = URLSession.shared.dataTask(with: url) { data, response, error in
+            // Check for errors
+            if let error = error {
+                completion(.failure(.networkError(error)))
+                return
+            }
+            
+            // Check for valid data
+            guard let data = data else {
+                completion(.failure(.noContent))
+                return
+            }
+            
+            // Convert data to UIImage
+            if let image = UIImage(data: data) {
+                completion(.success(image))
+            } else {
+                completion(.failure(.invalidImageData))
+            }
+        }
+        
+        task.resume()
+    }
+    
     // MARK: - Process User Feedback
     func processUserFeedback(originalContent: String, userFeedback: String, completion: @escaping (Result<String, OpenAIServiceError>) -> Void) {
         retryWithBackoff(maxRetries: 3, operation: { [weak self] innerCompletion in
@@ -343,171 +477,6 @@ class OpenAIService {
             ],
             completion: completion
         )
-    }
-    
-    // MARK: - Image Generation
-    func generateImage(prompt: String, completion: @escaping (Result<Data, OpenAIServiceError>) -> Void) {
-        guard !apiKey.isEmpty else {
-            completion(.failure(.invalidAPIKey))
-            return
-        }
-        
-        // Check rate limit
-        if !checkRateLimit() {
-            completion(.failure(.rateLimitExceeded))
-            return
-        }
-        
-        // Log request start
-        logRequest("Generating image with DALL-E", details: "Prompt: \(prompt.truncated(to: 100))")
-        
-        // Prepare the request
-        let endpoint = "\(baseURL)/images/generations"
-        guard let url = URL(string: endpoint) else {
-            completion(.failure(.invalidURL))
-            return
-        }
-        
-        // Create the request
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        // Prepare the request body
-        let requestBody: [String: Any] = [
-            "model": "dall-e-3",
-            "prompt": prompt,
-            "n": 1,
-            "size": "1024x1024",
-            "quality": "standard",
-            "response_format": "url"
-        ]
-        
-        do {
-            let jsonData = try JSONSerialization.data(withJSONObject: requestBody)
-            request.httpBody = jsonData
-            
-            // Log outgoing request details
-            logRequestDetails(request: request, body: ["prompt": prompt.truncated(to: 100), "model": "dall-e-3"])
-        } catch {
-            logError("Failed to create image generation request", error: error)
-            completion(.failure(.unexpectedError("Failed to create request: \(error.localizedDescription)")))
-            return
-        }
-        
-        // Send the request
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            // Handle network errors
-            if let error = error {
-                self.logError("Network error in image generation", error: error)
-                completion(.failure(.networkError(error)))
-                return
-            }
-            
-            // Check if we received data
-            guard let data = data, !data.isEmpty else {
-                self.logError("No data received from image generation", error: nil)
-                completion(.failure(.noContent))
-                return
-            }
-            
-            // Log response data if enabled (but abbreviated for images)
-            if self.enableDetailedLogging {
-                self.log("📨 Image generation response received - \(data.count) bytes")
-            }
-            
-            // Process the HTTP response
-            guard let httpResponse = response as? HTTPURLResponse else {
-                self.logError("Invalid response type from image generation", error: nil)
-                completion(.failure(.invalidResponse))
-                return
-            }
-            
-            // Process response based on status code
-            switch httpResponse.statusCode {
-            case 200...299:
-                // Handle successful response
-                do {
-                    if let jsonResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let data = jsonResponse["data"] as? [[String: Any]],
-                       let firstImage = data.first,
-                       let url = firstImage["url"] as? String {
-                        
-                        self.log("✅ Successfully received image URL: \(url.truncated(to: 50))")
-                        
-                        // Download the image
-                        self.downloadImage(from: url) { result in
-                            switch result {
-                            case .success(let imageData):
-                                self.log("✅ Successfully downloaded image - \(imageData.count) bytes")
-                                completion(.success(imageData))
-                            case .failure(let error):
-                                self.logError("Failed to download image", error: error)
-                                completion(.failure(error))
-                            }
-                        }
-                    } else {
-                        self.logError("Failed to parse image response", error: nil)
-                        completion(.failure(.invalidResponse))
-                    }
-                } catch {
-                    self.logError("JSON parsing error in image response", error: error)
-                    completion(.failure(.decodingError(error)))
-                }
-                
-            case 401:
-                self.logError("Authentication error (401) in image generation", error: nil)
-                completion(.failure(.invalidAPIKey))
-            case 429:
-                self.logError("Rate limit exceeded (429) in image generation", error: nil)
-                completion(.failure(.rateLimitExceeded))
-            default:
-                self.logError("Server error (\(httpResponse.statusCode)) in image generation", error: nil)
-                completion(.failure(.serverError(httpResponse.statusCode)))
-            }
-        }
-        
-        task.resume()
-    }
-
-    private func downloadImage(from urlString: String, completion: @escaping (Result<Data, OpenAIServiceError>) -> Void) {
-        guard let url = URL(string: urlString) else {
-            logError("Invalid image URL", error: nil)
-            completion(.failure(.invalidURL))
-            return
-        }
-        
-        log("📥 Downloading image from: \(urlString.truncated(to: 50))")
-        
-        let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            if let error = error {
-                self.logError("Error downloading image", error: error)
-                completion(.failure(.networkError(error)))
-                return
-            }
-            
-            guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
-                self.logError("Invalid HTTP response when downloading image", error: nil)
-                completion(.failure(.invalidResponse))
-                return
-            }
-            
-            guard let data = data, !data.isEmpty else {
-                self.logError("No image data received", error: nil)
-                completion(.failure(.invalidImageData))
-                return
-            }
-            
-            self.log("✅ Image download complete - \(data.count) bytes")
-            completion(.success(data))
-        }
-        
-        task.resume()
     }
     
     // MARK: - Rate Limiting and Retry Helpers
@@ -597,18 +566,8 @@ class OpenAIService {
             return
         }
         
-        // Check rate limit
-        if !checkRateLimit() {
-            completion(.failure(.rateLimitExceeded))
-            return
-        }
-        
-        // Log request start
-        logRequest("Sending chat request to OpenAI", details: "Messages: \(truncateMessagesForLogging(messages))")
-        
-        // Prepare the request
-        let endpoint = "\(baseURL)/chat/completions"
-        guard let url = URL(string: endpoint) else {
+        // Ensure the URL is valid
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
             completion(.failure(.invalidURL))
             return
         }
@@ -616,139 +575,76 @@ class OpenAIService {
         // Create the request
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // Prepare the request body
+        // Create the request body
         let requestBody: [String: Any] = [
-            "model": "gpt-4",
+            "model": "gpt-4o",
             "messages": messages,
-            "max_tokens": 800
+            "temperature": 0.7,
+            "max_tokens": 2000
         ]
         
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: requestBody)
-            request.httpBody = jsonData
-            
-            // Log outgoing request details
-            logRequestDetails(request: request, body: requestBody)
+            // Convert the request body to JSON data
+            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         } catch {
-            logError("Failed to create request", error: error)
-            completion(.failure(.unexpectedError("Failed to create request: \(error.localizedDescription)")))
+            completion(.failure(.unexpectedError("Failed to encode request body: \(error.localizedDescription)")))
+            return
+        }
+        
+        // Check rate limit
+        if !checkRateLimit() {
+            completion(.failure(.rateLimitExceeded))
             return
         }
         
         // Send the request
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            guard let self = self else { return }
-            
-            // Handle network errors
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            // Check for errors
             if let error = error {
-                self.logError("Network error", error: error)
                 completion(.failure(.networkError(error)))
                 return
             }
             
-            // Check if we received data
-            guard let data = data, !data.isEmpty else {
-                self.logError("No data received", error: nil)
-                completion(.failure(.noContent))
-                return
-            }
-            
-            // Log response data if enabled
-            self.logResponseData(data: data)
-            
-            // Process the HTTP response
+            // Check for valid response and data
             guard let httpResponse = response as? HTTPURLResponse else {
-                self.logError("Invalid response type", error: nil)
                 completion(.failure(.invalidResponse))
                 return
             }
             
-            // Process response based on status code
+            guard let data = data else {
+                completion(.failure(.noContent))
+                return
+            }
+            
+            // Handle different HTTP status codes
             switch httpResponse.statusCode {
-            case 200...299:
-                // Handle successful response
+            case 200:
+                // Try to parse the response
                 do {
-                    if let jsonResponse = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let choices = jsonResponse["choices"] as? [[String: Any]],
+                    if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let choices = json["choices"] as? [[String: Any]],
                        let firstChoice = choices.first,
                        let message = firstChoice["message"] as? [String: Any],
                        let content = message["content"] as? String {
-                        
-                        self.log("✅ Received successful response from OpenAI chat API")
                         completion(.success(content))
                     } else {
-                        self.logError("Failed to parse response", error: nil)
                         completion(.failure(.invalidResponse))
                     }
                 } catch {
-                    self.logError("JSON parsing error", error: error)
-                    completion(.failure(.decodingError(error)))
+                    completion(.failure(.unexpectedError("Failed to decode response: \(error.localizedDescription)")))
                 }
-                
             case 401:
-                self.logError("Authentication error (401)", error: nil)
                 completion(.failure(.invalidAPIKey))
             case 429:
-                self.logError("Rate limit exceeded (429)", error: nil)
                 completion(.failure(.rateLimitExceeded))
             default:
-                self.logError("Server error (\(httpResponse.statusCode))", error: nil)
                 completion(.failure(.serverError(httpResponse.statusCode)))
             }
         }
         
         task.resume()
-    }
-    
-    // MARK: - Logging
-    private func log(_ message: String) {
-        if enableDetailedLogging {
-            print("📝 \(message)")
-        }
-    }
-    
-    private func logRequest(_ message: String, details: String) {
-        if enableDetailedLogging {
-            print("📨 \(message) - \(details)")
-        }
-    }
-    
-    private func logRequestDetails(request: URLRequest, body: [String: Any]) {
-        if enableDetailedLogging {
-            print("📨 Request to \(request.url?.absoluteString ?? "")")
-            print("📨 Headers: \(request.allHTTPHeaderFields ?? [:])")
-            print("📨 Body: \(body)")
-        }
-    }
-    
-    private func logResponseData(data: Data) {
-        if enableDetailedLogging && logResponses {
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("📨 Response: \(responseString)")
-            }
-        }
-    }
-    
-    private func logError(_ message: String, error: Error?) {
-        if enableDetailedLogging {
-            if let error = error {
-                print("🚨 \(message) - \(error.localizedDescription)")
-            } else {
-                print("🚨 \(message)")
-            }
-        }
-    }
-    
-    private func truncateMessagesForLogging(_ messages: [[String: String]]) -> String {
-        return messages.map { message in
-            if let content = message["content"] {
-                return "\(message["role"] ?? ""): \(content.truncated(to: 50))"
-            } else {
-                return "\(message["role"] ?? ""): \(message)"
-            }
-        }.joined(separator: "\n")
     }
 }

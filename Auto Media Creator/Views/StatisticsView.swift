@@ -181,7 +181,7 @@ struct StatisticsView: View {
                         ZStack {
                             Circle()
                                 .trim(from: 0, to: memePercentage)
-                                .stroke(Color.orange, lineWidth: 10)
+                                .stroke(Color.accentColor, lineWidth: 10)
                                 .frame(width: 80, height: 80)
                                 .rotationEffect(.degrees(-90))
                             

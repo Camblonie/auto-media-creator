@@ -8,27 +8,36 @@
 import SwiftUI
 import SwiftData
 
+// Placeholder ContentView for new app start
 struct ContentView: View {
-    // Environment dependencies
+    // Environment
     @Environment(\.modelContext) private var modelContext
-    
-    // State for app flow
-    @Binding var onboardingCompleted: Bool
+    @EnvironmentObject private var appServices: AppServices
     
     var body: some View {
-        ZStack {
-            if onboardingCompleted {
-                // Main app interface
-                MainView(modelContext: modelContext)
-            } else {
-                // Onboarding flow
-                OnboardingView(onboardingCompleted: $onboardingCompleted)
+        MainView(modelContext: modelContext)
+            .onAppear {
+                // Initialize OpenAI service with API key from settings
+                let fetchDescriptor = FetchDescriptor<UserSettings>()
+                if let settings = try? modelContext.fetch(fetchDescriptor).first,
+                   !settings.openAIApiKey.isEmpty {
+                    appServices.openAIService.setAPIKey(settings.openAIApiKey)
+                    print("OpenAI service initialized with stored API key")
+                }
             }
-        }
     }
 }
 
-#Preview {
-    ContentView(onboardingCompleted: .constant(true))
-        .modelContainer(for: [Item.self, UserSettings.self, SocialMediaPlatform.self, Post.self, PostGroup.self], inMemory: true)
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+            .modelContainer(for: [
+                UserSettings.self,
+                SocialMediaPlatform.self,
+                Post.self,
+                PostGroup.self,
+                ResearchContent.self
+            ])
+            .environmentObject(AppServices())
+    }
 }

@@ -9,31 +9,39 @@ extension View {
             .foregroundColor(.white)
             .padding()
             .frame(maxWidth: .infinity)
-            .background(Color.blue)
+            .background(Color.primaryColor)
             .cornerRadius(10)
     }
     
     // Apply secondary button styling
     func secondaryButtonStyle() -> some View {
         self.font(.headline)
-            .foregroundColor(.blue)
+            .foregroundColor(.primaryColor)
             .padding()
             .frame(maxWidth: .infinity)
-            .background(Color.white)
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.blue, lineWidth: 2)
+                    .stroke(Color.primaryColor, lineWidth: 1)
             )
             .cornerRadius(10)
     }
     
-    // Add a card style
+    // Apply accent button styling
+    func accentButtonStyle() -> some View {
+        self.font(.headline)
+            .foregroundColor(.white)
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.accentColor)
+            .cornerRadius(10)
+    }
+    
+    // Apply card styling
     func cardStyle() -> some View {
         self.padding()
-            .background(Color(UIColor.systemBackground))
-            .cornerRadius(10)
-            .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
-            .padding(.horizontal)
+            .background(Color.cardBackgroundColor)
+            .cornerRadius(12)
+            .shadow(color: Color.darkAccentColor.opacity(0.1), radius: 5, x: 0, y: 2)
     }
     
     // Hide keyboard on tap outside text fields
@@ -46,11 +54,43 @@ extension View {
 
 // MARK: - Color Extensions
 extension Color {
-    static let primaryColor = Color.blue
-    static let secondaryColor = Color(red: 0.1, green: 0.1, blue: 0.8)
-    static let accentColor = Color.orange
+    // Primary colors
+    static let primaryColor = Color(hex: "27476E")      // Deep blue
+    static let secondaryColor = Color(hex: "006992")    // Medium blue
+    static let accentColor = Color(hex: "ECA400")       // Golden yellow
+    
+    // Background colors
     static let backgroundColor = Color(UIColor.systemBackground)
-    static let cardBackgroundColor = Color(UIColor.secondarySystemBackground)
+    static let cardBackgroundColor = Color(hex: "EAF88F").opacity(0.2)  // Light yellow with opacity
+    
+    // Additional theme colors
+    static let darkAccentColor = Color(hex: "001D4A")   // Dark navy
+    
+    // Initialize color from hex string
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let a, r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (a, r, g, b) = (255, (int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (a, r, g, b) = (255, int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        case 8: // ARGB (32-bit)
+            (a, r, g, b) = (int >> 24, int >> 16 & 0xFF, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (a, r, g, b) = (1, 1, 1, 0)
+        }
+        
+        self.init(
+            .sRGB,
+            red: Double(r) / 255,
+            green: Double(g) / 255,
+            blue: Double(b) / 255,
+            opacity: Double(a) / 255
+        )
+    }
 }
 
 // MARK: - String Extensions

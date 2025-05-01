@@ -34,9 +34,10 @@ struct ReviewPostView: View {
                 }
                 
                 // Action buttons for pending items
-                if post.reviewStatus == .pendingTextReview || 
-                   post.reviewStatus == .pendingGraphicReview || 
-                   post.reviewStatus == .pendingMemeReview {
+                // Only show approve/reject buttons for graphic and meme review, not text review for memes
+                if (post.reviewStatus == .pendingTextReview && post.postType != .meme) ||
+                    post.reviewStatus == .pendingGraphicReview ||
+                    post.reviewStatus == .pendingMemeReview {
                     
                     // Feedback section
                     feedbackSection
@@ -94,10 +95,10 @@ struct ReviewPostView: View {
                 // Post type badge
                 Text(post.postType.rawValue)
                     .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(post.postType == .traditional ? Color.blue.opacity(0.2) : Color.orange.opacity(0.2))
-                    .cornerRadius(8)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(post.postType == .traditional ? Color.primaryColor.opacity(0.2) : Color.accentColor.opacity(0.2))
+                    .cornerRadius(4)
             }
             
             // Status and creation date
@@ -654,51 +655,75 @@ struct ReviewPostView: View {
     
     // Action buttons
     private var actionButtons: some View {
-        HStack {
-            // Reject button
-            Button(action: {
-                viewModel.rejectPost(post: post)
-                dismiss()
-            }) {
-                HStack {
-                    Image(systemName: "xmark")
-                    Text("Reject")
+        VStack(spacing: 8) {
+            HStack {
+                // Reject button
+                Button(action: {
+                    viewModel.rejectPost(post: post)
+                    dismiss()
+                }) {
+                    HStack {
+                        Image(systemName: "xmark")
+                        Text("Reject")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .foregroundColor(.red)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.red, lineWidth: 2)
+                    )
                 }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .foregroundColor(.red)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.red, lineWidth: 2)
-                )
+                
+                // Approve button only if not meme pending text
+                if !(post.postType == .meme && post.reviewStatus == .pendingTextReview) {
+                    Button(action: {
+                        switch post.reviewStatus {
+                        case .pendingTextReview:
+                            viewModel.approveTextContent(post: post)
+                        case .pendingGraphicReview:
+                            viewModel.approveGraphic(post: post)
+                        case .pendingMemeReview:
+                            viewModel.approveMeme(post: post)
+                        default:
+                            break
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "checkmark")
+                            Text("Approve")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .foregroundColor(.white)
+                        .background(Color.green)
+                        .cornerRadius(10)
+                    }
+                }
             }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
             
-            // Approve button
-            Button(action: {
-                switch post.reviewStatus {
-                case .pendingTextReview:
-                    viewModel.approveTextContent(post: post)
-                case .pendingGraphicReview:
-                    viewModel.approveGraphic(post: post)
-                case .pendingMemeReview:
-                    viewModel.approveMeme(post: post)
-                default:
-                    break
+            // Continue to Create Image button (always visible for all post types)
+            if post.reviewStatus == .pendingTextReview || post.reviewStatus == .pendingMemeReview {
+                Button(action: {
+                    viewModel.continueToCreateImage(for: post)
+                }) {
+                    HStack {
+                        Image(systemName: "photo.on.rectangle")
+                        Text("Continue to Create Image")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .foregroundColor(.blue)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.blue, lineWidth: 2)
+                    )
                 }
-            }) {
-                HStack {
-                    Image(systemName: "checkmark")
-                    Text("Approve")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .foregroundColor(.white)
-                .background(Color.green)
-                .cornerRadius(10)
+                .padding(.horizontal)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
     }
     
     // Helper for status icons
